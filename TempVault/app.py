@@ -1,6 +1,12 @@
-from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask import (
+    Flask,
+    render_template,
+    request,
+    jsonify,
+    send_from_directory
+)
 import os
-import time
+import sqlite3
 import uuid
 
 app = Flask(__name__)
@@ -12,58 +18,48 @@ app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
+DATABASE = os.path.join(BASE_DIR, "vault.db")
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
-app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
 
 
 # ============================================================
-# Temporary storage
+# Database connection
 # ============================================================
 
-vault_items = []
+def get_db():
+    connection = sqlite3.connect(DATABASE)
+    connection.row_factory = sqlite3.Row
+    return connection
 
 
 # ============================================================
-# Remove expired items
+# Create database
 # ============================================================
 
-def cleanup_expired():
-    global vault_items
+def init_database():
 
-    current_time = int(time.time() * 1000)
+    connection = get_db()
 
-    active_items = []
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS vault_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            item_type TEXT NOT NULL,
+            language TEXT,
+            tags TEXT,
+            code TEXT,
+            file_data TEXT,
+            file_name TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
-    for item in vault_items:
-
-        if item["expiresAt"] > current_time:
-            active_items.append(item)
-
-        else:
-            # Delete uploaded file if it exists
-            file_url = item.get("fileData")
-
-            if file_url and file_url.startswith("/uploads/"):
-
-                filename = os.path.basename(file_url)
-
-                file_path = os.path.join(
-                    app.config["UPLOAD_FOLDER"],
-                    filename
-                )
-
-                if os.path.exists(file_path):
-
-                    try:
-                        os.remove(file_path)
-
-                    except OSError:
-                        pass
-
-    vault_items = active_items
+    connection.commit()
+    connection.close()
 
 
 # ============================================================
@@ -73,37 +69,65 @@ def cleanup_expired():
 @app.route("/")
 def index():
 
-    cleanup_expired()
-
     return render_template("index.html")
 
 
 # ============================================================
-# Get items
+# Get all items
 # ============================================================
 
 @app.route("/api/items", methods=["GET"])
 def get_items():
 
-    cleanup_expired()
+    connection = get_db()
 
-    return jsonify(vault_items)
+    rows = connection.execute("""
+        SELECT *
+        FROM vault_items
+        ORDER BY id DESC
+    """).fetchall()
+
+    connection.close()
+
+    items = []
+
+    for row in rows:
+
+        tags = []
+
+        if row["tags"]:
+            tags = [
+                tag.strip()
+                for tag in row["tags"].split(",")
+                if tag.strip()
+            ]
+
+        items.append({
+            "id": row["id"],
+            "title": row["title"],
+            "type": row["item_type"],
+            "language": row["language"],
+            "tags": tags,
+            "code": row["code"] or "",
+            "fileData": row["file_data"],
+            "fileName": row["file_name"],
+            "createdAt": row["created_at"]
+        })
+
+    return jsonify(items)
 
 
 # ============================================================
-# Create item
+# Create new item
 # ============================================================
 
 @app.route("/api/items", methods=["POST"])
 def create_item():
 
-    cleanup_expired()
-
-    # --------------------------------------------------------
-    # Get form data
-    # --------------------------------------------------------
-
-    title = request.form.get("title", "").strip()
+    title = request.form.get(
+        "title",
+        ""
+    ).strip()
 
     item_type = request.form.get(
         "type",
@@ -152,60 +176,6 @@ def create_item():
         }), 400
 
     # --------------------------------------------------------
-    # Get expiration
-    # --------------------------------------------------------
-
-    try:
-
-        hours = int(
-            request.form.get(
-                "hours",
-                0
-            )
-        )
-
-        minutes = int(
-            request.form.get(
-                "minutes",
-                0
-            )
-        )
-
-    except (ValueError, TypeError):
-
-        return jsonify({
-            "error": "Invalid expiration duration."
-        }), 400
-
-    # --------------------------------------------------------
-    # Validate expiration
-    # --------------------------------------------------------
-
-    if hours < 0:
-
-        return jsonify({
-            "error": "Hours cannot be negative."
-        }), 400
-
-    if minutes < 0 or minutes > 59:
-
-        return jsonify({
-            "error": "Minutes must be between 0 and 59."
-        }), 400
-
-    duration_ms = (
-        (hours * 60 + minutes)
-        * 60
-        * 1000
-    )
-
-    if duration_ms <= 0:
-
-        return jsonify({
-            "error": "Expiration time must be greater than 0 minutes."
-        }), 400
-
-    # --------------------------------------------------------
     # Process tags
     # --------------------------------------------------------
 
@@ -215,15 +185,13 @@ def create_item():
         if tag.strip()
     ]
 
-    # --------------------------------------------------------
-    # File variables
-    # --------------------------------------------------------
+    tags_string = ",".join(tags)
 
     file_name = None
     file_url = None
 
     # --------------------------------------------------------
-    # Upload file
+    # Handle image/file upload
     # --------------------------------------------------------
 
     if item_type in ("image", "file"):
@@ -258,7 +226,6 @@ def create_item():
             + extension
         )
 
-        # Full file path
         file_path = os.path.join(
             app.config["UPLOAD_FOLDER"],
             stored_name
@@ -275,49 +242,54 @@ def create_item():
         )
 
     # --------------------------------------------------------
-    # Create item
+    # Save to database
     # --------------------------------------------------------
 
-    current_time = int(
-        time.time() * 1000
-    )
+    connection = get_db()
 
-    item = {
-        "id": current_time,
-
-        "title": title,
-
-        "type": item_type,
-
-        "language": language,
-
-        "tags": tags,
-
-        "code": (
-            code
-            if item_type == "code"
-            else ""
-        ),
-
-        "fileData": file_url,
-
-        "fileName": file_name,
-
-        "expiresAt": (
-            current_time
-            + duration_ms
+    cursor = connection.execute("""
+        INSERT INTO vault_items (
+            title,
+            item_type,
+            language,
+            tags,
+            code,
+            file_data,
+            file_name
         )
-    }
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        title,
+        item_type,
+        language,
+        tags_string,
+        code if item_type == "code" else "",
+        file_url,
+        file_name
+    ))
 
-    # Add newest item first
-    vault_items.insert(
-        0,
-        item
-    )
+    connection.commit()
+
+    item_id = cursor.lastrowid
+
+    connection.close()
+
+    # --------------------------------------------------------
+    # Return created item
+    # --------------------------------------------------------
 
     return jsonify({
         "message": "Item saved successfully.",
-        "item": item
+        "item": {
+            "id": item_id,
+            "title": title,
+            "type": item_type,
+            "language": language,
+            "tags": tags,
+            "code": code if item_type == "code" else "",
+            "fileData": file_url,
+            "fileName": file_name
+        }
     }), 201
 
 
@@ -331,36 +303,32 @@ def create_item():
 )
 def delete_item(item_id):
 
-    global vault_items
+    connection = get_db()
 
-    cleanup_expired()
+    row = connection.execute("""
+        SELECT *
+        FROM vault_items
+        WHERE id = ?
+    """, (item_id,)).fetchone()
 
-    item = next(
-        (
-            item
-            for item in vault_items
-            if item["id"] == item_id
-        ),
-        None
-    )
+    if row is None:
 
-    if item is None:
+        connection.close()
 
         return jsonify({
             "error": "Item not found."
         }), 404
 
-    # Delete associated file
-    file_url = item.get(
-        "fileData"
-    )
+    # --------------------------------------------------------
+    # Delete uploaded file
+    # --------------------------------------------------------
 
-    if file_url and file_url.startswith(
-        "/uploads/"
-    ):
+    file_data = row["file_data"]
+
+    if file_data:
 
         filename = os.path.basename(
-            file_url
+            file_data
         )
 
         file_path = os.path.join(
@@ -376,41 +344,20 @@ def delete_item(item_id):
             except OSError:
                 pass
 
-    # Remove item
-    vault_items = [
-        item
-        for item in vault_items
-        if item["id"] != item_id
-    ]
+    # --------------------------------------------------------
+    # Delete database record
+    # --------------------------------------------------------
+
+    connection.execute("""
+        DELETE FROM vault_items
+        WHERE id = ?
+    """, (item_id,))
+
+    connection.commit()
+    connection.close()
 
     return jsonify({
         "message": "Item deleted successfully."
-    })
-
-
-# ============================================================
-# Clear expired items
-# ============================================================
-
-@app.route(
-    "/api/clear-expired",
-    methods=["DELETE"]
-)
-def clear_expired():
-
-    before = len(vault_items)
-
-    cleanup_expired()
-
-    removed = (
-        before
-        - len(vault_items)
-    )
-
-    return jsonify({
-        "message": (
-            f"{removed} expired item(s) removed."
-        )
     })
 
 
@@ -430,7 +377,7 @@ def uploaded_file(filename):
 
 
 # ============================================================
-# File too large error
+# File too large
 # ============================================================
 
 @app.errorhandler(413)
@@ -439,6 +386,13 @@ def file_too_large(error):
     return jsonify({
         "error": "File is too large. Maximum size is 16 MB."
     }), 413
+
+
+# ============================================================
+# Initialize database
+# ============================================================
+
+init_database()
 
 
 # ============================================================
