@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TempVault - Auto Expiry Storage</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+</head>
+
+<body class="bg-slate-900 text-slate-100 min-h-screen font-sans p-6">
+
+<div class="max-w-5xl mx-auto space-y-6">
+
+  <header class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-4 border-b border-slate-800">
+    <div>
+      <h1 class="text-2xl font-bold tracking-tight text-white">TempVault</h1>
+      <p class="text-slate-400 text-sm">
+        Temporary storage for text, images, and files with auto-expiration
+      </p>
+    </div>
+
+    <button onclick="clearExpiredItems()"
+            class="px-3 py-1.5 text-xs bg-red-900/40 hover:bg-red-800/60 text-red-300 rounded border border-red-700/50 transition">
+      🧹 Clear Expired
+    </button>
+  </header>
+
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <input type="text"
+           id="searchInput"
+           oninput="renderVault()"
+           placeholder="Search active items..."
+           class="md:col-span-2 px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-500">
+
+    <button onclick="openModal()"
+            class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg text-sm transition">
+      + Add Temporary Item
+    </button>
+  </div>
+
+  <main id="vaultGrid" class="grid grid-cols-1 gap-4"></main>
+
+</div>
+
+<!-- Modal -->
+<div id="vaultModal"
+     class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden flex items-center justify-center p-4 z-50">
+
+  <div class="bg-slate-800 border border-slate-700 rounded-xl max-w-xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+
+    <h2 class="text-lg font-bold text-white">Add Temporary Entry</h2>
+
+    <div class="space-y-3">
+
+      <input type="text"
+             id="modalTitle"
+             placeholder="Title (e.g., Quick Note or Meeting Document)"
+             class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm text-white focus:outline-none focus:border-indigo-500">
+
+      <div class="grid grid-cols-2 gap-3">
+
+        <select id="modalType"
+                onchange="handleTypeChange()"
+                class="px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm text-slate-300 focus:outline-none">
+          <option value="code">Code / Text Content</option>
+          <option value="image">Image Attachment</option>
+          <option value="file">Document File</option>
+        </select>
+
+        <select id="modalLang"
+                class="px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm text-slate-300 focus:outline-none">
+          <option value="javascript">JavaScript</option>
+          <option value="python">Python</option>
+          <option value="html">HTML</option>
+          <option value="css">CSS</option>
+          <option value="sql">SQL</option>
+          <option value="markdown">Markdown</option>
+          <option value="json">JSON</option>
+          <option value="bash">Bash</option>
+        </select>
+
+      </div>
+
+      <div class="p-3 bg-slate-900/80 rounded-lg border border-slate-700 space-y-2">
+
+        <label class="block text-xs font-semibold text-indigo-400 uppercase tracking-wider">
+          Set Auto-Expiration Duration
+        </label>
+
+        <div class="grid grid-cols-2 gap-3">
+
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Hours:</label>
+            <input type="number"
+                   id="expiryHours"
+                   min="0"
+                   value="1"
+                   class="w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-white focus:outline-none focus:border-indigo-500">
+          </div>
+
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Minutes:</label>
+            <input type="number"
+                   id="expiryMinutes"
+                   min="0"
+                   max="59"
+                   value="0"
+                   class="w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-white focus:outline-none focus:border-indigo-500">
+          </div>
+
+        </div>
+      </div>
+
+      <input type="text"
+             id="modalTags"
+             placeholder="Tags (comma separated, e.g., temp, draft, meeting)"
+             class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm text-white focus:outline-none focus:border-indigo-500">
+
+      <div id="codeFieldContainer">
+        <textarea id="modalCode"
+                  rows="6"
+                  placeholder="Paste text content or snippet here..."
+                  class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm font-mono text-slate-200 focus:outline-none focus:border-indigo-500"></textarea>
+      </div>
+
+      <div id="fileUploadContainer" class="hidden space-y-2">
+
+        <label class="block text-xs text-slate-400">
+          Select File or Image from Computer:
+        </label>
+
+        <input type="file"
+               id="modalFileInput"
+               class="w-full text-xs text-slate-300 border border-slate-700 bg-slate-900 rounded p-2 focus:outline-none">
+
+        <p class="text-xs text-slate-500">
+          Maximum file size: 16 MB
+        </p>
+
+      </div>
+
+    </div>
+
+    <div class="flex justify-end gap-2 pt-2">
+
+      <button onclick="closeModal()"
+              class="px-4 py-2 text-sm text-slate-400 hover:text-white">
+        Cancel
+      </button>
+
+      <button onclick="saveItem()"
+              class="px-4 py-2 text-sm bg-indigo-600 hover:bg-indigo-500 text-white rounded font-medium">
+        Save Item
+      </button>
+
+    </div>
+
+  </div>
+</div>
+
+<script>
+let vaultItems = [];
+
+async function loadItems() {
+  try {
+    const response = await fetch("/api/items");
+
+    if (!response.ok) {
+      throw new Error("Unable to load items.");
+    }
+
+    vaultItems = await response.json();
+    renderVault();
+
+  } catch (error) {
+    console.error(error);
+
+    document.getElementById("vaultGrid").innerHTML =
+      `<div class="text-center py-12 text-red-400 text-sm">
+        Unable to connect to the Flask server.
+      </div>`;
+  }
+}
+
+function handleTypeChange() {
+  const type = document.getElementById("modalType").value;
+
+  const codeContainer =
+    document.getElementById("codeFieldContainer");
+
+  const fileContainer =
+    document.getElementById("fileUploadContainer");
+
+  const langSelect =
+    document.getElementById("modalLang");
+
+  if (type === "code") {
+    codeContainer.classList.remove("hidden");
+    fileContainer.classList.add("hidden");
+    langSelect.disabled = false;
+  } else {
+    codeContainer.classList.add("hidden");
+    fileContainer.classList.remove("hidden");
+    langSelect.disabled = true;
+
+    if (type === "image") {
+      document.getElementById("modalFileInput").accept =
+        "image/*";
+    } else {
+      document.getElementById("modalFileInput").accept = "";
+    }
+  }
+}
+
+function openModal() {
+  document.getElementById("modalTitle").value = "";
+  document.getElementById("modalTags").value = "";
+  document.getElementById("modalCode").value = "";
+  document.getElementById("modalFileInput").value = "";
+
+  document.getElementById("expiryHours").value = "1";
+  document.getElementById("expiryMinutes").value = "0";
+
+  document.getElementById("modalType").value = "code";
+
+  handleTypeChange();
+
+  document.getElementById("vaultModal")
+    .classList.remove("hidden");
+}
+
+function closeModal() {
+  document.getElementById("vaultModal")
+    .classList.add("hidden");
+}
+
+async function saveItem() {
+
+  const title =
+    document.getElementById("modalTitle").value.trim();
+
+  const type =
+    document.getElementById("modalType").value;
+
+  const language =
+    document.getElementById("modalLang").value;
+
+  const tags =
+    document.getElementById("modalTags").value;
+
+  const code =
+    document.getElementById("modalCode").value;
+
+  const fileInput =
+    document.getElementById("modalFileInput");
+
+  const hours =
+    parseInt(document.getElementById("expiryHours").value) || 0;
+
+  const minutes =
+    parseInt(document.getElementById("expiryMinutes").value) || 0;
+
+  if (!title) {
+    alert("Title is required.");
+    return;
+  }
+
+  if (hours === 0 && minutes === 0) {
+    alert("Please set an expiration time greater than 0 minutes.");
+    return;
+  }
+
+  if (minutes < 0 || minutes > 59) {
+    alert("Minutes must be between 0 and 59.");
+    return;
+  }
+
+  if (type !== "code" && fileInput.files.length === 0) {
+    alert("Please select a file or image.");
+    return;
+  }
+
+  if (type === "image" && fileInput.files.length > 0) {
+    const file = fileInput.files[0];
+
+    if (!file.type.startsWith("image/")) {
+      alert("Please select a valid image.");
+      return;
+    }
+  }
+
+  const formData = new FormData();
+
+  formData.append("title", title);
+  formData.append("type", type);
+  formData.append("language", language);
+  formData.append("tags", tags);
+  formData.append("code", code);
+  formData.append("hours", hours);
+  formData.append("minutes", minutes);
+
+  if (fileInput.files.length > 0) {
+    formData.append("file", fileInput.files[0]);
+  }
+
+  try {
+
+    const response = await fetch("/api/items", {
+      method: "POST",
+      body: formData
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      alert(result.error || "Unable to save item.");
+      return;
+    }
+
+    closeModal();
+    await loadItems();
+
+  } catch (error) {
+    console.error(error);
+    alert("Unable to connect to the Flask server.");
+  }
+}
+
+async function deleteItem(id) {
+
+  if (!confirm("Delete this temporary item?")) {
+    return;
+  }
+
+  try {
+
+    const response = await fetch(
+      `/api/items/${id}`,
+      { method: "DELETE" }
+    );
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      alert(result.error || "Unable to delete item.");
+      return;
+    }
+
+    await loadItems();
+
+  } catch (error) {
+    console.error(error);
+    alert("Unable to connect to the Flask server.");
+  }
+}
+
+async function clearExpiredItems() {
+
+  try {
+
+    const response = await fetch(
+      "/api/clear-expired",
+      { method: "DELETE" }
+    );
+
+    const result = await response.json();
+
+    alert(result.message);
+
+    await loadItems();
+
+  } catch (error) {
+    console.error(error);
+    alert("Unable to connect to the Flask server.");
+  }
+}
+
+function getRemainingTimeFormatted(expiresAt) {
+
+  const diff = expiresAt - Date.now();
+
+  if (diff <= 0) {
+    return "Expired";
+  }
+
+  const totalSeconds =
+    Math.floor(diff / 1000);
+
+  const hours =
+    Math.floor(totalSeconds / 3600);
+
+  const minutes =
+    Math.floor((totalSeconds % 3600) / 60);
+
+  const seconds =
+    totalSeconds % 60;
+
+  return `${hours}h ${minutes}m ${seconds}s`;
+}
+
+function renderVault() {
+
+  const now = Date.now();
+
+  const query =
+    document.getElementById("searchInput")
+      .value
+      .toLowerCase()
+      .trim();
+
+  const grid =
+    document.getElementById("vaultGrid");
+
+  const activeItems =
+    vaultItems.filter(
+      item => item.expiresAt > now
+    );
+
+  const filtered =
+    activeItems.filter(item => {
+
+      return (
+        item.title.toLowerCase().includes(query) ||
+
+        (item.code &&
+          item.code.toLowerCase().includes(query)) ||
+
+        (item.fileName &&
+          item.fileName.toLowerCase().includes(query)) ||
+
+        item.tags.some(
+          tag => tag.toLowerCase().includes(query)
+        )
+      );
+    });
+
+  if (filtered.length === 0) {
+
+    grid.innerHTML = `
+      <div class="text-center py-12 text-slate-500 text-sm">
+        No active temporary items. Add one to get started.
+      </div>
+    `;
+
+    return;
+  }
+
+  grid.innerHTML =
+    filtered.map(item => `
+
+      <article
+        class="bg-slate-800/80 border border-slate-700/60 rounded-xl p-4 space-y-3">
+
+        <div class="flex justify-between items-center gap-3">
+
+          <h3 class="font-semibold text-slate-100 text-base break-words">
+            ${escapeHTML(item.title)}
+          </h3>
+
+          <div class="flex items-center gap-2 shrink-0">
+
+            <span
+              class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono font-semibold">
+
+              ⏳
+
+              <span
+                data-expiry="${item.expiresAt}"
+                class="countdown-timer">
+
+                ${getRemainingTimeFormatted(item.expiresAt)}
+
+              </span>
+
+            </span>
+
+            <span
+              class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-slate-700 text-slate-300 font-mono">
+
+              ${escapeHTML(item.type)}
+
+            </span>
+
+            <button
+              onclick="deleteItem(${item.id})"
+              class="text-slate-500 hover:text-red-400 text-xs px-1">
+
+              ✕
+
+            </button>
+
+          </div>
+        </div>
+
+        <div class="flex flex-wrap gap-1.5">
+
+          ${item.tags.map(tag => `
+            <span class="text-xs text-indigo-400">
+              #${escapeHTML(tag)}
+            </span>
+          `).join("")}
+
+        </div>
+
+        ${renderContent(item)}
+
+      </article>
+
+    `).join("");
+
+  if (window.Prism) {
+    Prism.highlightAll();
+  }
+}
+
+function renderContent(item) {
+
+  if (item.type === "code") {
+
+    return `
+      <pre
+        class="rounded-lg !bg-slate-950 !p-3 text-xs font-mono overflow-x-auto">
+
+        <code class="language-${escapeHTML(item.language)}">${escapeHTML(item.code)}</code>
+
+      </pre>
+    `;
+
+  }
+
+  if (item.type === "image") {
+
+    return `
+      <div class="space-y-2">
+
+        <img
+          src="${escapeHTML(item.fileData)}"
+          alt="${escapeHTML(item.title)}"
+          class="max-h-64 max-w-full rounded border border-slate-700 object-contain bg-slate-950 p-1">
+
+        <a
+          href="${escapeHTML(item.fileData)}"
+          download="${escapeHTML(item.fileName)}"
+          class="inline-block text-xs text-indigo-400 hover:underline">
+
+          📥 Download Image
+          (${escapeHTML(item.fileName)})
+
+        </a>
+
+      </div>
+    `;
+  }
+
+  if (item.type === "file") {
+
+    return `
+      <div
+        class="bg-slate-900 border border-slate-700 p-3 rounded flex justify-between items-center gap-3 text-xs">
+
+        <span class="font-mono text-slate-300 break-all">
+          📄 ${escapeHTML(item.fileName)}
+        </span>
+
+        <a
+          href="${escapeHTML(item.fileData)}"
+          download="${escapeHTML(item.fileName)}"
+          class="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded font-medium shrink-0">
+
+          Download File
+
+        </a>
+
+      </div>
+    `;
+  }
+
+  return "";
+}
+
+function escapeHTML(str) {
+
+  return String(str || "").replace(
+    /[&<>'"]/g,
+
+    tag => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      "'": "&#39;",
+      '"': "&quot;"
+    }[tag] || tag)
+  );
+}
+
+setInterval(() => {
+
+  let expiredFound = false;
+
+  document
+    .querySelectorAll(".countdown-timer")
+    .forEach(element => {
+
+      const expiry =
+        parseInt(element.dataset.expiry);
+
+      const remaining =
+        expiry - Date.now();
+
+      if (remaining <= 0) {
+        expiredFound = true;
+      } else {
+        element.innerText =
+          getRemainingTimeFormatted(expiry);
+      }
+
+    });
+
+  if (expiredFound) {
+    loadItems();
+  }
+
+}, 1000);
+
+loadItems();
+</script>
+
+</body>
+</html>
